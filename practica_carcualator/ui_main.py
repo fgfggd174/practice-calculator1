@@ -1,5 +1,8 @@
 import sys
-import math  # <-- добавлен импорт
+import math
+import json  # <-- добавлен
+import logging
+
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QComboBox, QPushButton, QTableWidget,
@@ -9,14 +12,30 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QDoubleValidator
 
+# <-- Импорт DatabaseManager
+from database import DatabaseManager
+
+# Настройка логирования (будет расширена в коммите 6, пока базовая)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Калькулятор площади и периметра")
         self.resize(1000, 700)
         self.setMinimumSize(900, 600)
+
+        # <-- Инициализация БД
+        self.db = DatabaseManager()
+
         self._setup_ui()
         self._bind_signals()
+
+        # <-- Загрузка истории
+        self._refresh_history()
 
     def _setup_ui(self):
         central_widget = QWidget()
@@ -64,15 +83,33 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(result_group)
         left_layout.addStretch()
 
-        # Правая панель (история – пока пустая)
+        # Правая панель (история)
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
+
         history_title = QLabel("История вычислений")
         history_title.setObjectName("historyTitle")
         right_layout.addWidget(history_title)
+
+        # <-- Настройка таблицы истории (5 колонок)
         self.history_table = QTableWidget()
-        self.history_table.setColumnCount(0)
+        self.history_table.setColumnCount(5)
+        self.history_table.setHorizontalHeaderLabels([
+            "Фигура", "Параметры", "Площадь", "Периметр", "Дата"
+        ])
+        self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.history_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.history_table.setAlternatingRowColors(True)
         right_layout.addWidget(self.history_table)
+
+        # <-- Кнопки управления историей
+        hist_btn_layout = QHBoxLayout()
+        self.btn_delete_selected = QPushButton("Удалить выбранную")
+        self.btn_clear_history = QPushButton("Очистить всё")
+        hist_btn_layout.addWidget(self.btn_delete_selected)
+        hist_btn_layout.addWidget(self.btn_clear_history)
+        right_layout.addLayout(hist_btn_layout)
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(left_widget)
@@ -122,6 +159,9 @@ class MainWindow(QMainWindow):
         QLineEdit:focus { border: 2px solid #2196F3; }
         QComboBox { border: 1px solid #ccc; border-radius: 4px; padding: 5px; background-color: white; }
         QComboBox:on { border: 2px solid #2196F3; }
+        QTableWidget { gridline-color: #d0d0d0; alternate-background-color: #fafafa; selection-background-color: #cce5ff; }
+        QTableWidget::item:selected { background-color: #b3d9ff; }
+        QHeaderView::section { background-color: #e0e0e0; padding: 4px; border: 1px solid #ccc; font-weight: bold; }
         QLabel#mainTitle { font-size: 20px; font-weight: bold; color: #333; padding: 10px 0; }
         QLabel#historyTitle { font-size: 16px; font-weight: bold; color: #333; }
         QSplitter::handle { background-color: #d0d0d0; width: 2px; }
@@ -132,6 +172,9 @@ class MainWindow(QMainWindow):
         self.figure_combo.currentIndexChanged.connect(self._on_figure_changed)
         self.btn_calc.clicked.connect(self._calculate)
         self.btn_clear.clicked.connect(self._clear_fields)
+        # <-- Привязка новых кнопок
+        self.btn_delete_selected.clicked.connect(self._delete_selected_history)
+        self.btn_clear_history.clicked.connect(self._clear_all_history)
 
     def _on_figure_changed(self, index):
         self.params_stack.setCurrentIndex(index)
@@ -142,7 +185,6 @@ class MainWindow(QMainWindow):
     def _get_current_figure(self):
         return self.figure_combo.currentText()
 
-    # ---------- Новая реальная реализация ----------
     def _get_params_from_ui(self):
         figure = self._get_current_figure()
         fields = self.input_fields.get(figure, {})
@@ -208,6 +250,11 @@ class MainWindow(QMainWindow):
         self.lbl_area.setText(f"Площадь: {area:.4f}" if area is not None else "Площадь: —")
         self.lbl_perimeter.setText(f"Периметр: {perimeter:.4f}" if perimeter is not None else "Периметр: —")
 
+        # <-- Сохранение в БД (пока без единиц, передаём пустую строку)
+        self.db.insert_record(figure, params, "", area, perimeter)
+        # <-- Обновление таблицы истории
+        self._refresh_history()
+
     def _clear_fields(self):
         figure = self._get_current_figure()
         fields = self.input_fields.get(figure, {})
@@ -215,3 +262,53 @@ class MainWindow(QMainWindow):
             line_edit.clear()
         self.lbl_area.setText("Площадь: —")
         self.lbl_perimeter.setText("Периметр: —")
+
+    # <-- Новые методы для работы с историей
+    def _refresh_history(self):
+        records = self.db.get_all_records()
+        self.history_table.setRowCount(0)
+        for i, rec in enumerate(records):
+            self.history_table.insertRow(i)
+            self.history_table.setItem(i, 0, QTableWidgetItem(rec['figure_type']))
+            params = json.loads(rec['params'])
+            params_str = ', '.join(f"{k}={v:.2f}" for k, v in params.items())
+            self.history_table.setItem(i, 1, QTableWidgetItem(params_str))
+            self.history_table.setItem(i, 2, QTableWidgetItem(f"{rec['area']:.4f}" if rec['area'] else "—"))
+            self.history_table.setItem(i, 3, QTableWidgetItem(f"{rec['perimeter']:.4f}" if rec['perimeter'] else "—"))
+            self.history_table.setItem(i, 4, QTableWidgetItem(rec['timestamp']))
+            self.history_table.item(i, 0).setData(Qt.UserRole, rec['id'])
+
+    def _delete_selected_history(self):
+        selected = self.history_table.selectionModel().selectedRows()
+        if not selected:
+            QMessageBox.information(self, "Внимание", "Выберите запись для удаления.")
+            return
+        row = selected[0].row()
+        item = self.history_table.item(row, 0)
+        if not item:
+            return
+        record_id = item.data(Qt.UserRole)
+        if QMessageBox.question(self, "Подтверждение", "Удалить выбранную запись?",
+                                 QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+            self.db.delete_record(record_id)
+            self._refresh_history()
+
+    def _clear_all_history(self):
+        if QMessageBox.question(self, "Подтверждение", "Удалить всю историю?",
+                                 QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+            self.db.clear_history()
+            self._refresh_history()
+
+    # <-- Обработка закрытия окна
+    def closeEvent(self, event):
+        reply = QMessageBox.question(self, "Выход",
+                                      "Вы уверены, что хотите выйти?",
+                                      QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                                      QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.db.close()
+            event.accept()
+        elif reply == QMessageBox.No:
+            event.ignore()
+        else:
+            event.ignore()
