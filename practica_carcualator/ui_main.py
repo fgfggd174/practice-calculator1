@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem, QHeaderView, QMessageBox, QStackedWidget,
     QSplitter, QGroupBox, QFileDialog
 )
-from PyQt5.QtCore import Qt, QSettings  # <-- добавлен QSettings
+from PyQt5.QtCore import Qt, QSettings
 from PyQt5.QtGui import QDoubleValidator
 
 from database import DatabaseManager
@@ -32,7 +32,7 @@ class MainWindow(QMainWindow):
         self.resize(1000, 700)
         self.setMinimumSize(900, 600)
 
-        # ---------- Инициализация настроек (QSettings) ----------
+        # Инициализация настроек
         self.settings = QSettings("MyCompany", "AreaPerimeterCalc")
 
         # Инициализация БД
@@ -41,7 +41,7 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._bind_signals()
 
-        # ---------- Восстановление настроек ----------
+        # Восстановление геометрии и состояния
         self.restore_geometry()
 
         # Восстановление выбранной фигуры и единиц
@@ -52,6 +52,12 @@ class MainWindow(QMainWindow):
         unit_index = self.settings.value("unit_index", 0, type=int)
         if 0 <= unit_index < self.unit_combo.count():
             self.unit_combo.setCurrentIndex(unit_index)
+
+        # ---------- Восстановление темы ----------
+        theme = self.settings.value("theme", "light")
+        self.apply_theme(theme)
+        idx = 0 if theme == "light" else 1
+        self.theme_combo.setCurrentIndex(idx)
 
         self._refresh_history()
 
@@ -110,6 +116,19 @@ class MainWindow(QMainWindow):
         result_layout.addWidget(self.lbl_area)
         result_layout.addWidget(self.lbl_perimeter)
         left_layout.addWidget(result_group)
+
+        # ---------- Блок настроек (тема) ----------
+        bonus_group = QGroupBox("Настройки")
+        bonus_layout = QVBoxLayout(bonus_group)
+
+        theme_layout = QHBoxLayout()
+        theme_layout.addWidget(QLabel("Тема:"))
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(["Светлая", "Тёмная"])
+        theme_layout.addWidget(self.theme_combo)
+        bonus_layout.addLayout(theme_layout)
+
+        left_layout.addWidget(bonus_group)
         left_layout.addStretch()
 
         # Правая панель (история)
@@ -155,7 +174,8 @@ class MainWindow(QMainWindow):
         splitter.setSizes([450, 550])
         main_layout.addWidget(splitter)
 
-        self._apply_styles()
+        # Применяем стиль по умолчанию (светлый)
+        self._apply_styles("light")
 
     def _create_param_widgets(self):
         self.input_fields = {}
@@ -184,28 +204,90 @@ class MainWindow(QMainWindow):
             self.params_stack.addWidget(widget)
         self.params_stack.setCurrentIndex(0)
 
-    def _apply_styles(self):
-        style = """
-        QMainWindow { background-color: #f0f2f5; }
-        QGroupBox { font-weight: bold; border: 1px solid #ccc; border-radius: 6px; margin-top: 8px; }
-        QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
-        QPushButton { background-color: #4CAF50; color: white; border: none; padding: 8px 16px; border-radius: 4px; font-weight: bold; }
-        QPushButton:hover { background-color: #45a049; }
-        QPushButton:pressed { background-color: #3d8b40; }
-        QPushButton#calcBtn { background-color: #2196F3; }
-        QPushButton#calcBtn:hover { background-color: #1e87db; }
-        QPushButton#calcBtn:pressed { background-color: #1a78c2; }
-        QLineEdit { border: 1px solid #ccc; border-radius: 4px; padding: 6px; background-color: white; }
-        QLineEdit:focus { border: 2px solid #2196F3; }
-        QComboBox { border: 1px solid #ccc; border-radius: 4px; padding: 5px; background-color: white; }
-        QComboBox:on { border: 2px solid #2196F3; }
-        QTableWidget { gridline-color: #d0d0d0; alternate-background-color: #fafafa; selection-background-color: #cce5ff; }
-        QTableWidget::item:selected { background-color: #b3d9ff; }
-        QHeaderView::section { background-color: #e0e0e0; padding: 4px; border: 1px solid #ccc; font-weight: bold; }
-        QLabel#mainTitle { font-size: 20px; font-weight: bold; color: #333; padding: 10px 0; }
-        QLabel#historyTitle { font-size: 16px; font-weight: bold; color: #333; }
-        QSplitter::handle { background-color: #d0d0d0; width: 2px; }
-        """
+    # ---------- Обновлённый метод _apply_styles с поддержкой тем ----------
+    def _apply_styles(self, theme="light"):
+        """Применяет QSS стили в зависимости от темы."""
+        if theme == "light":
+            style = """
+            QMainWindow { background-color: #f0f2f5; }
+            QGroupBox { font-weight: bold; border: 1px solid #ccc; border-radius: 6px; margin-top: 8px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+            QPushButton { background-color: #4CAF50; color: white; border: none; padding: 8px 16px; border-radius: 4px; font-weight: bold; }
+            QPushButton:hover { background-color: #45a049; }
+            QPushButton:pressed { background-color: #3d8b40; }
+            QPushButton#calcBtn { background-color: #2196F3; }
+            QPushButton#calcBtn:hover { background-color: #1e87db; }
+            QPushButton#calcBtn:pressed { background-color: #1a78c2; }
+            QLineEdit { border: 1px solid #ccc; border-radius: 4px; padding: 6px; background-color: white; }
+            QLineEdit:focus { border: 2px solid #2196F3; }
+            QComboBox { border: 1px solid #ccc; border-radius: 4px; padding: 5px; background-color: white; }
+            QComboBox:on { border: 2px solid #2196F3; }
+            QTableWidget { gridline-color: #d0d0d0; background-color: white; alternate-background-color: #fafafa; }
+            QTableWidget::item { background-color: white; color: black; }
+            QTableWidget::item:selected { background-color: #cce5ff; color: black; }
+            QHeaderView::section { background-color: #e0e0e0; padding: 4px; border: 1px solid #ccc; font-weight: bold; color: black; }
+            QTableCornerButton::section { background-color: #e0e0e0; border: 1px solid #ccc; }
+            QLabel#mainTitle { font-size: 20px; font-weight: bold; color: #333; padding: 10px 0; }
+            QLabel#historyTitle { font-size: 16px; font-weight: bold; color: #333; }
+            QSplitter::handle { background-color: #d0d0d0; width: 2px; }
+            QScrollBar:vertical { background: #f0f0f0; width: 12px; border-radius: 6px; }
+            QScrollBar::handle:vertical { background: #c0c0c0; border-radius: 6px; min-height: 20px; }
+            QScrollBar::handle:vertical:hover { background: #a0a0a0; }
+            QScrollBar:horizontal { background: #f0f0f0; height: 12px; border-radius: 6px; }
+            QScrollBar::handle:horizontal { background: #c0c0c0; border-radius: 6px; min-width: 20px; }
+            QScrollBar::handle:horizontal:hover { background: #a0a0a0; }
+            """
+        else:  # dark
+            style = """
+            QMainWindow { background-color: #2b2b2b; }
+            QGroupBox { font-weight: bold; border: 1px solid #555; border-radius: 6px; margin-top: 8px; color: #eee; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+            QPushButton { background-color: #3a3a3a; color: #eee; border: 1px solid #555; padding: 8px 16px; border-radius: 4px; font-weight: bold; }
+            QPushButton:hover { background-color: #4a4a4a; }
+            QPushButton:pressed { background-color: #2a2a2a; }
+            QPushButton#calcBtn { background-color: #1e88e5; }
+            QPushButton#calcBtn:hover { background-color: #42a5f5; }
+            QPushButton#calcBtn:pressed { background-color: #1565c0; }
+            QLineEdit { border: 1px solid #555; border-radius: 4px; padding: 6px; background-color: #3c3c3c; color: #eee; }
+            QLineEdit:focus { border: 2px solid #1e88e5; }
+            QComboBox { border: 1px solid #555; border-radius: 4px; padding: 5px; background-color: #3c3c3c; color: #eee; }
+            QComboBox:on { border: 2px solid #1e88e5; }
+            QTableWidget {
+                gridline-color: #555;
+                background-color: #2b2b2b;
+                alternate-background-color: #333333;
+                color: #eee;
+            }
+            QTableWidget::item {
+                background-color: #2b2b2b;
+                color: #eee;
+            }
+            QTableWidget::item:selected {
+                background-color: #1e88e5;
+                color: white;
+            }
+            QHeaderView::section {
+                background-color: #3a3a3a;
+                color: #eee;
+                padding: 4px;
+                border: 1px solid #555;
+                font-weight: bold;
+            }
+            QTableCornerButton::section {
+                background-color: #3a3a3a;
+                border: 1px solid #555;
+            }
+            QLabel#mainTitle { font-size: 20px; font-weight: bold; color: #eee; padding: 10px 0; }
+            QLabel#historyTitle { font-size: 16px; font-weight: bold; color: #eee; }
+            QSplitter::handle { background-color: #555; width: 2px; }
+            QLabel { color: #eee; }
+            QScrollBar:vertical { background: #3a3a3a; width: 12px; border-radius: 6px; }
+            QScrollBar::handle:vertical { background: #5a5a5a; border-radius: 6px; min-height: 20px; }
+            QScrollBar::handle:vertical:hover { background: #7a7a7a; }
+            QScrollBar:horizontal { background: #3a3a3a; height: 12px; border-radius: 6px; }
+            QScrollBar::handle:horizontal { background: #5a5a5a; border-radius: 6px; min-width: 20px; }
+            QScrollBar::handle:horizontal:hover { background: #7a7a7a; }
+            """
         self.setStyleSheet(style)
 
     def _bind_signals(self):
@@ -219,11 +301,24 @@ class MainWindow(QMainWindow):
         self.btn_import_csv.clicked.connect(lambda: self._import_data("csv"))
         self.btn_import_json.clicked.connect(lambda: self._import_data("json"))
 
+        # ---------- Привязка сигнала изменения темы ----------
+        self.theme_combo.currentTextChanged.connect(self._on_theme_changed)
+
     def _on_figure_changed(self, index):
         self.params_stack.setCurrentIndex(index)
         self._clear_fields()
         self.lbl_area.setText("Площадь: —")
         self.lbl_perimeter.setText("Периметр: —")
+
+    # ---------- Новые методы для работы с темой ----------
+    def _on_theme_changed(self, theme_text):
+        theme = "light" if theme_text == "Светлая" else "dark"
+        self.apply_theme(theme)
+        self.settings.setValue("theme", theme)
+
+    def apply_theme(self, theme):
+        self._apply_styles(theme)
+        self.current_theme = theme
 
     def _get_current_figure(self):
         return self.figure_combo.currentText()
@@ -425,16 +520,16 @@ class MainWindow(QMainWindow):
             logging.error(f"Ошибка импорта: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать: {e}")
 
-    # ---------- НОВЫЕ МЕТОДЫ ДЛЯ QSettings ----------
     def save_geometry(self):
-        """Сохраняет геометрию, состояние и выбранные значения в QSettings."""
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("windowState", self.saveState())
         self.settings.setValue("figure_index", self.figure_combo.currentIndex())
         self.settings.setValue("unit_index", self.unit_combo.currentIndex())
+        # Сохраняем тему
+        if hasattr(self, 'current_theme'):
+            self.settings.setValue("theme", self.current_theme)
 
     def restore_geometry(self):
-        """Восстанавливает геометрию и состояние из QSettings."""
         geometry = self.settings.value("geometry")
         if geometry:
             self.restoreGeometry(geometry)
@@ -448,7 +543,6 @@ class MainWindow(QMainWindow):
                                       QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
                                       QMessageBox.No)
         if reply == QMessageBox.Yes:
-            # ---------- Сохраняем настройки перед закрытием ----------
             self.save_geometry()
             self.db.close()
             logging.info("Приложение закрыто.")
