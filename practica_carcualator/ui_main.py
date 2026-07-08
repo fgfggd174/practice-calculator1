@@ -1,16 +1,16 @@
 import sys
 import math
 import json
-import csv  # <-- добавлен импорт csv
+import csv
 import logging
 
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QComboBox, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QMessageBox, QStackedWidget,
-    QSplitter, QGroupBox, QFileDialog  # <-- добавлен QFileDialog
+    QSplitter, QGroupBox, QFileDialog
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QSettings  # <-- добавлен QSettings
 from PyQt5.QtGui import QDoubleValidator
 
 from database import DatabaseManager
@@ -32,11 +32,27 @@ class MainWindow(QMainWindow):
         self.resize(1000, 700)
         self.setMinimumSize(900, 600)
 
+        # ---------- Инициализация настроек (QSettings) ----------
+        self.settings = QSettings("MyCompany", "AreaPerimeterCalc")
+
         # Инициализация БД
         self.db = DatabaseManager()
 
         self._setup_ui()
         self._bind_signals()
+
+        # ---------- Восстановление настроек ----------
+        self.restore_geometry()
+
+        # Восстановление выбранной фигуры и единиц
+        figure_index = self.settings.value("figure_index", 0, type=int)
+        if 0 <= figure_index < self.figure_combo.count():
+            self.figure_combo.setCurrentIndex(figure_index)
+
+        unit_index = self.settings.value("unit_index", 0, type=int)
+        if 0 <= unit_index < self.unit_combo.count():
+            self.unit_combo.setCurrentIndex(unit_index)
+
         self._refresh_history()
 
         logging.info("Приложение запущено.")
@@ -115,16 +131,13 @@ class MainWindow(QMainWindow):
         self.history_table.setAlternatingRowColors(True)
         right_layout.addWidget(self.history_table)
 
-        # ---------- Кнопки управления историей + экспорт/импорт ----------
+        # Кнопки управления историей + экспорт/импорт
         hist_btn_layout = QHBoxLayout()
-
-        # Кнопки управления историей
         self.btn_delete_selected = QPushButton("Удалить выбранную")
         self.btn_clear_history = QPushButton("Очистить всё")
         hist_btn_layout.addWidget(self.btn_delete_selected)
         hist_btn_layout.addWidget(self.btn_clear_history)
 
-        # Кнопки экспорта и импорта (добавлены в этом коммите)
         self.btn_export_csv = QPushButton("Экспорт CSV")
         self.btn_export_json = QPushButton("Экспорт JSON")
         self.btn_import_csv = QPushButton("Импорт CSV")
@@ -201,8 +214,6 @@ class MainWindow(QMainWindow):
         self.btn_clear.clicked.connect(self._clear_fields)
         self.btn_delete_selected.clicked.connect(self._delete_selected_history)
         self.btn_clear_history.clicked.connect(self._clear_all_history)
-
-        # ---------- Привязка кнопок экспорта/импорта ----------
         self.btn_export_csv.clicked.connect(lambda: self._export_data("csv"))
         self.btn_export_json.clicked.connect(lambda: self._export_data("json"))
         self.btn_import_csv.clicked.connect(lambda: self._import_data("csv"))
@@ -350,31 +361,26 @@ class MainWindow(QMainWindow):
             self.db.clear_history()
             self._refresh_history()
 
-    # ---------- НОВЫЕ МЕТОДЫ ДЛЯ ЭКСПОРТА/ИМПОРТА ----------
     def _export_data(self, format_type):
-        """Экспорт истории в CSV или JSON."""
         records = self.db.get_all_records()
         if not records:
             QMessageBox.information(self, "Экспорт", "Нет данных для экспорта.")
             return
-
         path, _ = QFileDialog.getSaveFileName(
             self, "Сохранить как", "",
             f"{format_type.upper()} files (*.{format_type})"
         )
         if not path:
             return
-
         try:
             if format_type == "csv":
                 with open(path, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    # Заголовки
                     writer.writerow(["figure_type", "params", "unit", "area", "perimeter", "timestamp"])
                     for rec in records:
                         writer.writerow([
                             rec['figure_type'],
-                            rec['params'],  # уже JSON-строка
+                            rec['params'],
                             rec['unit'],
                             rec['area'],
                             rec['perimeter'],
@@ -382,24 +388,19 @@ class MainWindow(QMainWindow):
                         ])
             elif format_type == "json":
                 with open(path, 'w', encoding='utf-8') as f:
-                    # Преобразуем sqlite3.Row в dict для сериализации
                     json.dump([dict(rec) for rec in records], f, ensure_ascii=False, indent=2)
-
             QMessageBox.information(self, "Экспорт", f"Данные успешно экспортированы в {format_type.upper()}.")
-            logging.info(f"Экспорт в {format_type.upper()} выполнен: {path}")
         except Exception as e:
             logging.error(f"Ошибка экспорта: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать: {e}")
 
     def _import_data(self, format_type):
-        """Импорт истории из CSV или JSON."""
         path, _ = QFileDialog.getOpenFileName(
             self, "Выберите файл", "",
             f"{format_type.upper()} files (*.{format_type})"
         )
         if not path:
             return
-
         try:
             if format_type == "csv":
                 with open(path, 'r', encoding='utf-8') as f:
@@ -410,25 +411,36 @@ class MainWindow(QMainWindow):
                         area = float(row['area']) if row['area'] else None
                         perimeter = float(row['perimeter']) if row['perimeter'] else None
                         self.db.insert_record(row['figure_type'], params, unit, area, perimeter)
-
             elif format_type == "json":
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     for rec in data:
                         self.db.insert_record(
-                            rec['figure_type'],
-                            json.loads(rec['params']),
-                            rec['unit'],
-                            rec['area'],
-                            rec['perimeter']
+                            rec['figure_type'], json.loads(rec['params']),
+                            rec['unit'], rec['area'], rec['perimeter']
                         )
-
             self._refresh_history()
             QMessageBox.information(self, "Импорт", f"Данные успешно импортированы из {format_type.upper()}.")
-            logging.info(f"Импорт из {format_type.upper()} выполнен: {path}")
         except Exception as e:
             logging.error(f"Ошибка импорта: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать: {e}")
+
+    # ---------- НОВЫЕ МЕТОДЫ ДЛЯ QSettings ----------
+    def save_geometry(self):
+        """Сохраняет геометрию, состояние и выбранные значения в QSettings."""
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("windowState", self.saveState())
+        self.settings.setValue("figure_index", self.figure_combo.currentIndex())
+        self.settings.setValue("unit_index", self.unit_combo.currentIndex())
+
+    def restore_geometry(self):
+        """Восстанавливает геометрию и состояние из QSettings."""
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+        state = self.settings.value("windowState")
+        if state:
+            self.restoreState(state)
 
     def closeEvent(self, event):
         reply = QMessageBox.question(self, "Выход",
@@ -436,6 +448,8 @@ class MainWindow(QMainWindow):
                                       QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
                                       QMessageBox.No)
         if reply == QMessageBox.Yes:
+            # ---------- Сохраняем настройки перед закрытием ----------
+            self.save_geometry()
             self.db.close()
             logging.info("Приложение закрыто.")
             event.accept()
