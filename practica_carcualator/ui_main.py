@@ -1,6 +1,6 @@
 import sys
 import math
-import json  # <-- добавлен
+import json
 import logging
 
 from PyQt5.QtWidgets import (
@@ -12,13 +12,16 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QDoubleValidator
 
-# <-- Импорт DatabaseManager
 from database import DatabaseManager
 
-# Настройка логирования (будет расширена в коммите 6, пока базовая)
+# ---------- Расширенное логирование ----------
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("calc.log", encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 
 class MainWindow(QMainWindow):
@@ -28,14 +31,14 @@ class MainWindow(QMainWindow):
         self.resize(1000, 700)
         self.setMinimumSize(900, 600)
 
-        # <-- Инициализация БД
+        # Инициализация БД
         self.db = DatabaseManager()
 
         self._setup_ui()
         self._bind_signals()
-
-        # <-- Загрузка истории
         self._refresh_history()
+
+        logging.info("Приложение запущено.")
 
     def _setup_ui(self):
         central_widget = QWidget()
@@ -91,7 +94,6 @@ class MainWindow(QMainWindow):
         history_title.setObjectName("historyTitle")
         right_layout.addWidget(history_title)
 
-        # <-- Настройка таблицы истории (5 колонок)
         self.history_table = QTableWidget()
         self.history_table.setColumnCount(5)
         self.history_table.setHorizontalHeaderLabels([
@@ -103,7 +105,7 @@ class MainWindow(QMainWindow):
         self.history_table.setAlternatingRowColors(True)
         right_layout.addWidget(self.history_table)
 
-        # <-- Кнопки управления историей
+        # Кнопки управления историей
         hist_btn_layout = QHBoxLayout()
         self.btn_delete_selected = QPushButton("Удалить выбранную")
         self.btn_clear_history = QPushButton("Очистить всё")
@@ -138,6 +140,11 @@ class MainWindow(QMainWindow):
             for label_text, param_name in params:
                 line_edit = QLineEdit()
                 line_edit.setPlaceholderText(f"Введите {label_text.lower()}")
+
+                # ---------- Добавлен валидатор ----------
+                validator = QDoubleValidator(0.0, 1e9, 5)
+                line_edit.setValidator(validator)
+
                 layout.addRow(label_text + ":", line_edit)
                 fields[param_name] = line_edit
             self.input_fields[figure_type] = fields
@@ -172,7 +179,6 @@ class MainWindow(QMainWindow):
         self.figure_combo.currentIndexChanged.connect(self._on_figure_changed)
         self.btn_calc.clicked.connect(self._calculate)
         self.btn_clear.clicked.connect(self._clear_fields)
-        # <-- Привязка новых кнопок
         self.btn_delete_selected.clicked.connect(self._delete_selected_history)
         self.btn_clear_history.clicked.connect(self._clear_all_history)
 
@@ -202,12 +208,30 @@ class MainWindow(QMainWindow):
                 return None
         return params
 
+    # ---------- Новая проверка для треугольника ----------
+    def _validate_triangle(self, params):
+        """Проверка неравенства треугольника: a + b > c, a + c > b, b + c > a"""
+        a = params.get('a')
+        b = params.get('b')
+        c = params.get('c')
+        if a is None or b is None or c is None:
+            return False
+        return (a + b > c) and (a + c > b) and (b + c > a)
+
     def _calculate(self):
         figure = self._get_current_figure()
         params = self._get_params_from_ui()
+
+        # Валидация: все поля заполнены положительными числами
         if params is None:
             QMessageBox.warning(self, "Ошибка ввода",
                                 "Пожалуйста, заполните все поля положительными числами.")
+            return
+
+        # Проверка неравенства треугольника
+        if figure == "Треугольник" and not self._validate_triangle(params):
+            QMessageBox.warning(self, "Ошибка валидации",
+                                "Не выполнено неравенство треугольника (сумма двух сторон должна быть больше третьей).")
             return
 
         area = None
@@ -244,16 +268,21 @@ class MainWindow(QMainWindow):
                 area = a * h
                 perimeter = 4 * a
         except Exception as e:
+            # Логируем ошибку
+            logging.error(f"Ошибка вычисления: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить расчёт: {e}")
             return
 
+        # Вывод результата
         self.lbl_area.setText(f"Площадь: {area:.4f}" if area is not None else "Площадь: —")
         self.lbl_perimeter.setText(f"Периметр: {perimeter:.4f}" if perimeter is not None else "Периметр: —")
 
-        # <-- Сохранение в БД (пока без единиц, передаём пустую строку)
+        # Сохранение в БД (пока без единиц)
         self.db.insert_record(figure, params, "", area, perimeter)
-        # <-- Обновление таблицы истории
         self._refresh_history()
+
+        # Логируем успешный расчёт
+        logging.info(f"Расчёт выполнен: {figure}, площадь={area}, периметр={perimeter}")
 
     def _clear_fields(self):
         figure = self._get_current_figure()
@@ -263,7 +292,6 @@ class MainWindow(QMainWindow):
         self.lbl_area.setText("Площадь: —")
         self.lbl_perimeter.setText("Периметр: —")
 
-    # <-- Новые методы для работы с историей
     def _refresh_history(self):
         records = self.db.get_all_records()
         self.history_table.setRowCount(0)
@@ -299,7 +327,6 @@ class MainWindow(QMainWindow):
             self.db.clear_history()
             self._refresh_history()
 
-    # <-- Обработка закрытия окна
     def closeEvent(self, event):
         reply = QMessageBox.question(self, "Выход",
                                       "Вы уверены, что хотите выйти?",
@@ -307,6 +334,7 @@ class MainWindow(QMainWindow):
                                       QMessageBox.No)
         if reply == QMessageBox.Yes:
             self.db.close()
+            logging.info("Приложение закрыто.")
             event.accept()
         elif reply == QMessageBox.No:
             event.ignore()
