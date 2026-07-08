@@ -1,13 +1,14 @@
 import sys
 import math
 import json
+import csv  # <-- добавлен импорт csv
 import logging
 
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QComboBox, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QMessageBox, QStackedWidget,
-    QSplitter, QGroupBox
+    QSplitter, QGroupBox, QFileDialog  # <-- добавлен QFileDialog
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QDoubleValidator
@@ -53,7 +54,7 @@ class MainWindow(QMainWindow):
         title.setObjectName("mainTitle")
         left_layout.addWidget(title)
 
-        # ---------- Блок выбора фигуры и единиц (горизонтальный лейаут) ----------
+        # Блок выбора фигуры и единиц
         selector_layout = QHBoxLayout()
         self.figure_combo = QComboBox()
         self.figure_combo.addItems([
@@ -63,12 +64,11 @@ class MainWindow(QMainWindow):
         selector_layout.addWidget(QLabel("Фигура:"))
         selector_layout.addWidget(self.figure_combo)
 
-        # Добавляем выбор единиц
         self.unit_combo = QComboBox()
         self.unit_combo.addItems(["см", "м"])
         selector_layout.addWidget(QLabel("Единицы:"))
         selector_layout.addWidget(self.unit_combo)
-        selector_layout.addStretch()  # растягиваем, чтобы прижать к левому краю
+        selector_layout.addStretch()
 
         left_layout.addLayout(selector_layout)
 
@@ -115,12 +115,25 @@ class MainWindow(QMainWindow):
         self.history_table.setAlternatingRowColors(True)
         right_layout.addWidget(self.history_table)
 
-        # Кнопки управления историей
+        # ---------- Кнопки управления историей + экспорт/импорт ----------
         hist_btn_layout = QHBoxLayout()
+
+        # Кнопки управления историей
         self.btn_delete_selected = QPushButton("Удалить выбранную")
         self.btn_clear_history = QPushButton("Очистить всё")
         hist_btn_layout.addWidget(self.btn_delete_selected)
         hist_btn_layout.addWidget(self.btn_clear_history)
+
+        # Кнопки экспорта и импорта (добавлены в этом коммите)
+        self.btn_export_csv = QPushButton("Экспорт CSV")
+        self.btn_export_json = QPushButton("Экспорт JSON")
+        self.btn_import_csv = QPushButton("Импорт CSV")
+        self.btn_import_json = QPushButton("Импорт JSON")
+        hist_btn_layout.addWidget(self.btn_export_csv)
+        hist_btn_layout.addWidget(self.btn_export_json)
+        hist_btn_layout.addWidget(self.btn_import_csv)
+        hist_btn_layout.addWidget(self.btn_import_json)
+
         right_layout.addLayout(hist_btn_layout)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -189,6 +202,12 @@ class MainWindow(QMainWindow):
         self.btn_delete_selected.clicked.connect(self._delete_selected_history)
         self.btn_clear_history.clicked.connect(self._clear_all_history)
 
+        # ---------- Привязка кнопок экспорта/импорта ----------
+        self.btn_export_csv.clicked.connect(lambda: self._export_data("csv"))
+        self.btn_export_json.clicked.connect(lambda: self._export_data("json"))
+        self.btn_import_csv.clicked.connect(lambda: self._import_data("csv"))
+        self.btn_import_json.clicked.connect(lambda: self._import_data("json"))
+
     def _on_figure_changed(self, index):
         self.params_stack.setCurrentIndex(index)
         self._clear_fields()
@@ -198,7 +217,6 @@ class MainWindow(QMainWindow):
     def _get_current_figure(self):
         return self.figure_combo.currentText()
 
-    # ---------- Новый метод для получения единиц ----------
     def _get_current_unit(self):
         return self.unit_combo.currentText()
 
@@ -229,7 +247,7 @@ class MainWindow(QMainWindow):
 
     def _calculate(self):
         figure = self._get_current_figure()
-        unit = self._get_current_unit()  # <-- получаем выбранную единицу
+        unit = self._get_current_unit()
         params = self._get_params_from_ui()
         if params is None:
             QMessageBox.warning(self, "Ошибка ввода",
@@ -278,13 +296,11 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить расчёт: {e}")
             return
 
-        # ---------- Вывод результата с единицами ----------
         area_str = f"{area:.4f} {unit}²" if area is not None else "—"
         perim_str = f"{perimeter:.4f} {unit}" if perimeter is not None else "—"
         self.lbl_area.setText("Площадь: " + area_str)
         self.lbl_perimeter.setText("Периметр: " + perim_str)
 
-        # ---------- Сохранение в БД с передачей единиц ----------
         self.db.insert_record(figure, params, unit, area, perimeter)
         self._refresh_history()
 
@@ -305,11 +321,9 @@ class MainWindow(QMainWindow):
             self.history_table.insertRow(i)
             self.history_table.setItem(i, 0, QTableWidgetItem(rec['figure_type']))
             params = json.loads(rec['params'])
-            unit = rec['unit']  # <-- получаем единицу из записи
-            # ---------- Отображение параметров с единицами ----------
+            unit = rec['unit']
             params_str = ', '.join(f"{k}={v:.2f}{unit}" if isinstance(v, float) else f"{k}={v}{unit}" for k, v in params.items())
             self.history_table.setItem(i, 1, QTableWidgetItem(params_str))
-            # ---------- Отображение площади и периметра с единицами ----------
             self.history_table.setItem(i, 2, QTableWidgetItem(f"{rec['area']:.4f} {unit}²" if rec['area'] else "—"))
             self.history_table.setItem(i, 3, QTableWidgetItem(f"{rec['perimeter']:.4f} {unit}" if rec['perimeter'] else "—"))
             self.history_table.setItem(i, 4, QTableWidgetItem(rec['timestamp']))
@@ -335,6 +349,86 @@ class MainWindow(QMainWindow):
                                  QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
             self.db.clear_history()
             self._refresh_history()
+
+    # ---------- НОВЫЕ МЕТОДЫ ДЛЯ ЭКСПОРТА/ИМПОРТА ----------
+    def _export_data(self, format_type):
+        """Экспорт истории в CSV или JSON."""
+        records = self.db.get_all_records()
+        if not records:
+            QMessageBox.information(self, "Экспорт", "Нет данных для экспорта.")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Сохранить как", "",
+            f"{format_type.upper()} files (*.{format_type})"
+        )
+        if not path:
+            return
+
+        try:
+            if format_type == "csv":
+                with open(path, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    # Заголовки
+                    writer.writerow(["figure_type", "params", "unit", "area", "perimeter", "timestamp"])
+                    for rec in records:
+                        writer.writerow([
+                            rec['figure_type'],
+                            rec['params'],  # уже JSON-строка
+                            rec['unit'],
+                            rec['area'],
+                            rec['perimeter'],
+                            rec['timestamp']
+                        ])
+            elif format_type == "json":
+                with open(path, 'w', encoding='utf-8') as f:
+                    # Преобразуем sqlite3.Row в dict для сериализации
+                    json.dump([dict(rec) for rec in records], f, ensure_ascii=False, indent=2)
+
+            QMessageBox.information(self, "Экспорт", f"Данные успешно экспортированы в {format_type.upper()}.")
+            logging.info(f"Экспорт в {format_type.upper()} выполнен: {path}")
+        except Exception as e:
+            logging.error(f"Ошибка экспорта: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать: {e}")
+
+    def _import_data(self, format_type):
+        """Импорт истории из CSV или JSON."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите файл", "",
+            f"{format_type.upper()} files (*.{format_type})"
+        )
+        if not path:
+            return
+
+        try:
+            if format_type == "csv":
+                with open(path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        params = json.loads(row['params'])
+                        unit = row['unit']
+                        area = float(row['area']) if row['area'] else None
+                        perimeter = float(row['perimeter']) if row['perimeter'] else None
+                        self.db.insert_record(row['figure_type'], params, unit, area, perimeter)
+
+            elif format_type == "json":
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    for rec in data:
+                        self.db.insert_record(
+                            rec['figure_type'],
+                            json.loads(rec['params']),
+                            rec['unit'],
+                            rec['area'],
+                            rec['perimeter']
+                        )
+
+            self._refresh_history()
+            QMessageBox.information(self, "Импорт", f"Данные успешно импортированы из {format_type.upper()}.")
+            logging.info(f"Импорт из {format_type.upper()} выполнен: {path}")
+        except Exception as e:
+            logging.error(f"Ошибка импорта: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать: {e}")
 
     def closeEvent(self, event):
         reply = QMessageBox.question(self, "Выход",
