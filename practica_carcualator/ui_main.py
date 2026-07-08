@@ -8,10 +8,11 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QComboBox, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QMessageBox, QStackedWidget,
-    QSplitter, QGroupBox, QFileDialog
+    QSplitter, QGroupBox, QFileDialog,
+    QShortcut  # <-- добавлен импорт QShortcut
 )
 from PyQt5.QtCore import Qt, QSettings
-from PyQt5.QtGui import QDoubleValidator
+from PyQt5.QtGui import QDoubleValidator, QKeySequence  # <-- добавлен QKeySequence
 
 from database import DatabaseManager
 
@@ -53,7 +54,7 @@ class MainWindow(QMainWindow):
         if 0 <= unit_index < self.unit_combo.count():
             self.unit_combo.setCurrentIndex(unit_index)
 
-        # ---------- Восстановление темы ----------
+        # Восстановление темы
         theme = self.settings.value("theme", "light")
         self.apply_theme(theme)
         idx = 0 if theme == "light" else 1
@@ -117,7 +118,7 @@ class MainWindow(QMainWindow):
         result_layout.addWidget(self.lbl_perimeter)
         left_layout.addWidget(result_group)
 
-        # ---------- Блок настроек (тема) ----------
+        # Блок настроек (тема)
         bonus_group = QGroupBox("Настройки")
         bonus_layout = QVBoxLayout(bonus_group)
 
@@ -177,6 +178,23 @@ class MainWindow(QMainWindow):
         # Применяем стиль по умолчанию (светлый)
         self._apply_styles("light")
 
+        # ---------- Горячие клавиши (добавлены в этом коммите) ----------
+        # Ctrl+Enter -> Рассчитать
+        self.shortcut_calc = QShortcut(QKeySequence("Ctrl+Return"), self)
+        self.shortcut_calc.activated.connect(self._calculate)
+
+        # Ctrl+Shift+C -> Очистить поля
+        self.shortcut_clear = QShortcut(QKeySequence("Ctrl+Shift+C"), self)
+        self.shortcut_clear.activated.connect(self._clear_fields)
+
+        # Del -> Удалить выбранную запись из истории
+        self.shortcut_delete = QShortcut(QKeySequence("Del"), self)
+        self.shortcut_delete.activated.connect(self._delete_selected_history)
+
+        # Ctrl+Q -> Выход (с подтверждением)
+        self.shortcut_exit = QShortcut(QKeySequence("Ctrl+Q"), self)
+        self.shortcut_exit.activated.connect(self.close)  # self.close вызывает closeEvent
+
     def _create_param_widgets(self):
         self.input_fields = {}
         figures_params = {
@@ -204,7 +222,6 @@ class MainWindow(QMainWindow):
             self.params_stack.addWidget(widget)
         self.params_stack.setCurrentIndex(0)
 
-    # ---------- Обновлённый метод _apply_styles с поддержкой тем ----------
     def _apply_styles(self, theme="light"):
         """Применяет QSS стили в зависимости от темы."""
         if theme == "light":
@@ -301,7 +318,7 @@ class MainWindow(QMainWindow):
         self.btn_import_csv.clicked.connect(lambda: self._import_data("csv"))
         self.btn_import_json.clicked.connect(lambda: self._import_data("json"))
 
-        # ---------- Привязка сигнала изменения темы ----------
+        # Тема
         self.theme_combo.currentTextChanged.connect(self._on_theme_changed)
 
     def _on_figure_changed(self, index):
@@ -310,7 +327,6 @@ class MainWindow(QMainWindow):
         self.lbl_area.setText("Площадь: —")
         self.lbl_perimeter.setText("Периметр: —")
 
-    # ---------- Новые методы для работы с темой ----------
     def _on_theme_changed(self, theme_text):
         theme = "light" if theme_text == "Светлая" else "dark"
         self.apply_theme(theme)
@@ -525,7 +541,6 @@ class MainWindow(QMainWindow):
         self.settings.setValue("windowState", self.saveState())
         self.settings.setValue("figure_index", self.figure_combo.currentIndex())
         self.settings.setValue("unit_index", self.unit_combo.currentIndex())
-        # Сохраняем тему
         if hasattr(self, 'current_theme'):
             self.settings.setValue("theme", self.current_theme)
 
