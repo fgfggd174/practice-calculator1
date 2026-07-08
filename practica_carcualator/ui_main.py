@@ -14,7 +14,7 @@ from PyQt5.QtGui import QDoubleValidator
 
 from database import DatabaseManager
 
-# ---------- Расширенное логирование ----------
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -53,14 +53,24 @@ class MainWindow(QMainWindow):
         title.setObjectName("mainTitle")
         left_layout.addWidget(title)
 
-        # Выбор фигуры
+        # ---------- Блок выбора фигуры и единиц (горизонтальный лейаут) ----------
+        selector_layout = QHBoxLayout()
         self.figure_combo = QComboBox()
         self.figure_combo.addItems([
             "Прямоугольник", "Квадрат", "Круг",
             "Треугольник", "Параллелограмм", "Трапеция", "Ромб"
         ])
-        left_layout.addWidget(QLabel("Фигура:"))
-        left_layout.addWidget(self.figure_combo)
+        selector_layout.addWidget(QLabel("Фигура:"))
+        selector_layout.addWidget(self.figure_combo)
+
+        # Добавляем выбор единиц
+        self.unit_combo = QComboBox()
+        self.unit_combo.addItems(["см", "м"])
+        selector_layout.addWidget(QLabel("Единицы:"))
+        selector_layout.addWidget(self.unit_combo)
+        selector_layout.addStretch()  # растягиваем, чтобы прижать к левому краю
+
+        left_layout.addLayout(selector_layout)
 
         # Стек параметров
         self.params_stack = QStackedWidget()
@@ -140,11 +150,8 @@ class MainWindow(QMainWindow):
             for label_text, param_name in params:
                 line_edit = QLineEdit()
                 line_edit.setPlaceholderText(f"Введите {label_text.lower()}")
-
-                # ---------- Добавлен валидатор ----------
                 validator = QDoubleValidator(0.0, 1e9, 5)
                 line_edit.setValidator(validator)
-
                 layout.addRow(label_text + ":", line_edit)
                 fields[param_name] = line_edit
             self.input_fields[figure_type] = fields
@@ -191,6 +198,10 @@ class MainWindow(QMainWindow):
     def _get_current_figure(self):
         return self.figure_combo.currentText()
 
+    # ---------- Новый метод для получения единиц ----------
+    def _get_current_unit(self):
+        return self.unit_combo.currentText()
+
     def _get_params_from_ui(self):
         figure = self._get_current_figure()
         fields = self.input_fields.get(figure, {})
@@ -208,9 +219,7 @@ class MainWindow(QMainWindow):
                 return None
         return params
 
-    # ---------- Новая проверка для треугольника ----------
     def _validate_triangle(self, params):
-        """Проверка неравенства треугольника: a + b > c, a + c > b, b + c > a"""
         a = params.get('a')
         b = params.get('b')
         c = params.get('c')
@@ -220,15 +229,12 @@ class MainWindow(QMainWindow):
 
     def _calculate(self):
         figure = self._get_current_figure()
+        unit = self._get_current_unit()  # <-- получаем выбранную единицу
         params = self._get_params_from_ui()
-
-        # Валидация: все поля заполнены положительными числами
         if params is None:
             QMessageBox.warning(self, "Ошибка ввода",
                                 "Пожалуйста, заполните все поля положительными числами.")
             return
-
-        # Проверка неравенства треугольника
         if figure == "Треугольник" and not self._validate_triangle(params):
             QMessageBox.warning(self, "Ошибка валидации",
                                 "Не выполнено неравенство треугольника (сумма двух сторон должна быть больше третьей).")
@@ -268,21 +274,21 @@ class MainWindow(QMainWindow):
                 area = a * h
                 perimeter = 4 * a
         except Exception as e:
-            # Логируем ошибку
             logging.error(f"Ошибка вычисления: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить расчёт: {e}")
             return
 
-        # Вывод результата
-        self.lbl_area.setText(f"Площадь: {area:.4f}" if area is not None else "Площадь: —")
-        self.lbl_perimeter.setText(f"Периметр: {perimeter:.4f}" if perimeter is not None else "Периметр: —")
+        # ---------- Вывод результата с единицами ----------
+        area_str = f"{area:.4f} {unit}²" if area is not None else "—"
+        perim_str = f"{perimeter:.4f} {unit}" if perimeter is not None else "—"
+        self.lbl_area.setText("Площадь: " + area_str)
+        self.lbl_perimeter.setText("Периметр: " + perim_str)
 
-        # Сохранение в БД (пока без единиц)
-        self.db.insert_record(figure, params, "", area, perimeter)
+        # ---------- Сохранение в БД с передачей единиц ----------
+        self.db.insert_record(figure, params, unit, area, perimeter)
         self._refresh_history()
 
-        # Логируем успешный расчёт
-        logging.info(f"Расчёт выполнен: {figure}, площадь={area}, периметр={perimeter}")
+        logging.info(f"Расчёт выполнен: {figure}, площадь={area}, периметр={perimeter}, единицы={unit}")
 
     def _clear_fields(self):
         figure = self._get_current_figure()
@@ -299,10 +305,13 @@ class MainWindow(QMainWindow):
             self.history_table.insertRow(i)
             self.history_table.setItem(i, 0, QTableWidgetItem(rec['figure_type']))
             params = json.loads(rec['params'])
-            params_str = ', '.join(f"{k}={v:.2f}" for k, v in params.items())
+            unit = rec['unit']  # <-- получаем единицу из записи
+            # ---------- Отображение параметров с единицами ----------
+            params_str = ', '.join(f"{k}={v:.2f}{unit}" if isinstance(v, float) else f"{k}={v}{unit}" for k, v in params.items())
             self.history_table.setItem(i, 1, QTableWidgetItem(params_str))
-            self.history_table.setItem(i, 2, QTableWidgetItem(f"{rec['area']:.4f}" if rec['area'] else "—"))
-            self.history_table.setItem(i, 3, QTableWidgetItem(f"{rec['perimeter']:.4f}" if rec['perimeter'] else "—"))
+            # ---------- Отображение площади и периметра с единицами ----------
+            self.history_table.setItem(i, 2, QTableWidgetItem(f"{rec['area']:.4f} {unit}²" if rec['area'] else "—"))
+            self.history_table.setItem(i, 3, QTableWidgetItem(f"{rec['perimeter']:.4f} {unit}" if rec['perimeter'] else "—"))
             self.history_table.setItem(i, 4, QTableWidgetItem(rec['timestamp']))
             self.history_table.item(i, 0).setData(Qt.UserRole, rec['id'])
 
