@@ -1,4 +1,5 @@
 import sys
+import math  # <-- добавлен импорт
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QComboBox, QPushButton, QTableWidget,
@@ -70,7 +71,7 @@ class MainWindow(QMainWindow):
         history_title.setObjectName("historyTitle")
         right_layout.addWidget(history_title)
         self.history_table = QTableWidget()
-        self.history_table.setColumnCount(0)  # пока без колонок
+        self.history_table.setColumnCount(0)
         right_layout.addWidget(self.history_table)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -141,12 +142,71 @@ class MainWindow(QMainWindow):
     def _get_current_figure(self):
         return self.figure_combo.currentText()
 
+    # ---------- Новая реальная реализация ----------
     def _get_params_from_ui(self):
-        # Заглушка – позже заменим на реальную
-        return {"a": 5, "b": 3}
+        figure = self._get_current_figure()
+        fields = self.input_fields.get(figure, {})
+        params = {}
+        for name, line_edit in fields.items():
+            text = line_edit.text().strip()
+            if not text:
+                return None
+            try:
+                value = float(text)
+                if value <= 0:
+                    return None
+                params[name] = value
+            except ValueError:
+                return None
+        return params
 
     def _calculate(self):
-        QMessageBox.information(self, "Заглушка", "Расчёт ещё не реализован.")
+        figure = self._get_current_figure()
+        params = self._get_params_from_ui()
+        if params is None:
+            QMessageBox.warning(self, "Ошибка ввода",
+                                "Пожалуйста, заполните все поля положительными числами.")
+            return
+
+        area = None
+        perimeter = None
+        try:
+            if figure == "Прямоугольник":
+                a = params['a']; b = params['b']
+                area = a * b
+                perimeter = 2 * (a + b)
+            elif figure == "Квадрат":
+                a = params['a']
+                area = a ** 2
+                perimeter = 4 * a
+            elif figure == "Круг":
+                r = params['r']
+                area = math.pi * r ** 2
+                perimeter = 2 * math.pi * r
+            elif figure == "Треугольник":
+                a = params['a']; b = params['b']; c = params['c']
+                s = (a + b + c) / 2
+                area = math.sqrt(s * (s - a) * (s - b) * (s - c))
+                perimeter = a + b + c
+            elif figure == "Параллелограмм":
+                a = params['a']; h = params['h']; b = params['b']
+                area = a * h
+                perimeter = 2 * (a + b)
+            elif figure == "Трапеция":
+                a = params['a']; b = params['b']; h = params['h']
+                c = params['c']; d = params['d']
+                area = (a + b) * h / 2
+                perimeter = a + b + c + d
+            elif figure == "Ромб":
+                a = params['a']; h = params['h']
+                area = a * h
+                perimeter = 4 * a
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить расчёт: {e}")
+            return
+
+        self.lbl_area.setText(f"Площадь: {area:.4f}" if area is not None else "Площадь: —")
+        self.lbl_perimeter.setText(f"Периметр: {perimeter:.4f}" if perimeter is not None else "Периметр: —")
 
     def _clear_fields(self):
         figure = self._get_current_figure()
